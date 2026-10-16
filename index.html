@@ -1,0 +1,1620 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#060308">
+<meta name="description" content="A polyrhythmic arcade instrument. Pick a chord, add voices, and watch them drift in and out of sync.">
+<title>The Dawkinators Fun Machine 5000</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23060308'/%3E%3Ccircle cx='16' cy='17' r='10' fill='none' stroke='%23ffb677' stroke-width='2'/%3E%3Ccircle cx='16' cy='7' r='3.2' fill='%23ff5078'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#060308;
+    --plate:#130710;
+    --plate-2:#1b0a16;
+    --well:#0d0409;
+    --line:rgba(255,182,119,0.18);
+    --line-strong:rgba(255,182,119,0.45);
+    --text:#f0e3d6;
+    --text-dim:#a08b95;
+    --text-faint:#6b5761;
+    --amber:#ffb677;
+    --pink:#ff5078;
+    --cyan:#6edcff;
+    --ink:#1a0a12;
+    --pixel:'Press Start 2P', 'IBM Plex Mono', ui-monospace, monospace;
+    --mono:'IBM Plex Mono', ui-monospace, monospace;
+    --safe-t:env(safe-area-inset-top, 0px);
+    --safe-b:env(safe-area-inset-bottom, 0px);
+    --plate-shadow: inset 0 1px 0 rgba(255,182,119,0.09), 0 0 0 1px rgba(0,0,0,0.55), 0 22px 50px rgba(0,0,0,0.55);
+  }
+  *{ box-sizing:border-box; }
+  html,body{
+    margin:0; height:100%; overflow:hidden;
+    background:var(--bg); color:var(--text);
+    font-family:var(--mono);
+    -webkit-font-smoothing:antialiased;
+    -webkit-tap-highlight-color:transparent;
+  }
+  body{ background: radial-gradient(120% 90% at 50% 42%, #16060f 0%, var(--bg) 62%); }
+  button, select, input{ touch-action:manipulation; }
+  :focus-visible{ outline:2px solid var(--cyan); outline-offset:2px; }
+
+  #stage{ position:fixed; inset:0; }
+  canvas{ display:block; width:100%; height:100%; }
+
+  /* static CRT glass: dark scanline gaps + vignette. No blend modes, no animation —
+     the canvas under it repaints every frame, so this layer must stay free to composite */
+  .crt{
+    position:fixed; inset:0; z-index:5; pointer-events:none;
+    background:
+      repeating-linear-gradient(to bottom, rgba(0,0,0,0.20) 0 1px, transparent 1px 3px),
+      radial-gradient(ellipse at 50% 48%, transparent 58%, rgba(0,0,0,0.55) 100%);
+  }
+
+  /* ---------- chord module (top right) ---------- */
+  .hud{
+    position:fixed; z-index:10;
+    top:calc(18px + var(--safe-t)); right:18px;
+    width:264px; padding:16px 16px 14px;
+    display:grid; gap:10px;
+    grid-template-columns:1fr;
+    grid-template-areas: "name" "pick" "toggles" "stats" "bar";
+    background:linear-gradient(180deg, var(--plate-2), var(--plate));
+    border:1px solid var(--line); border-radius:10px;
+    box-shadow:var(--plate-shadow);
+  }
+  .chordName{
+    grid-area:name;
+    font-family:var(--pixel); font-size:19px; line-height:1.35;
+    color:var(--amber);
+    text-shadow: -1px 0 rgba(255,80,120,0.6), 1px 0 rgba(110,220,255,0.6), 0 0 16px rgba(255,182,119,0.35);
+    min-height:26px; overflow-wrap:anywhere;
+  }
+  .chordName.zap{ animation:chordZap 0.42s ease-out; }
+  @keyframes chordZap{
+    0%{ text-shadow:-5px 0 rgba(255,80,120,0.95), 5px 0 rgba(110,220,255,0.95), 0 0 28px rgba(255,182,119,0.9); transform:translateX(2px); }
+    35%{ transform:translateX(-1px); }
+    100%{ transform:none; }
+  }
+  .pick{ grid-area:pick; display:grid; grid-template-columns:74px 1fr; gap:6px; }
+  .toggles{ grid-area:toggles; display:flex; gap:6px; justify-content:space-between; align-items:center; }
+
+  .sel{
+    appearance:none; -webkit-appearance:none;
+    width:100%; min-height:34px; padding:0 26px 0 10px;
+    font:500 12px var(--mono); color:var(--text);
+    background:var(--well) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23ffb677'/%3E%3C/svg%3E") no-repeat right 10px center / 8px 5px;
+    border:1px solid var(--line); border-radius:6px;
+    cursor:pointer; transition:border-color .15s ease, opacity .15s ease;
+  }
+  .sel:hover{ border-color:var(--line-strong); }
+  .sel:disabled{ opacity:.38; cursor:not-allowed; }
+  .sel option, .sel optgroup{ background:#12060f; color:var(--text); }
+
+  /* lit = amber fill + dark ink, like a backlit cabinet button: state reads at a glance */
+  .seg{ display:inline-flex; border:1px solid var(--line); border-radius:6px; overflow:hidden; background:var(--well); }
+  .seg button, .chip{
+    appearance:none; border:0; margin:0; cursor:pointer;
+    min-height:32px; padding:0 12px;
+    font:500 12px var(--mono); color:var(--text-dim);
+    background:transparent;
+    transition:background .12s ease, color .12s ease;
+  }
+  .seg button + button{ border-left:1px solid var(--line); }
+  .seg button:hover, .chip:hover{ color:var(--text); background:rgba(255,182,119,0.08); }
+  .seg button[aria-pressed="true"], .chip[aria-pressed="true"]{
+    color:var(--ink); background:var(--amber);
+    box-shadow:0 0 14px rgba(255,182,119,0.35);
+  }
+  .chip{ border:1px solid var(--line); border-radius:6px; background:var(--well); }
+  .spell button{ min-width:36px; font-size:14px; }
+
+  .stats{
+    grid-area:stats; margin:2px 0 0; padding-top:12px;
+    border-top:1px solid var(--line);
+    display:grid; gap:7px;
+  }
+  .stat{ display:flex; justify-content:space-between; align-items:baseline; gap:10px; }
+  .stat dt{ font-size:11px; color:var(--text-dim); }
+  .stat dd{ margin:0; font-family:var(--pixel); font-size:10px; color:var(--text); font-variant-numeric:tabular-nums; }
+  .syncBar{ grid-area:bar; height:4px; border-radius:2px; overflow:hidden; background:rgba(255,182,119,0.10); }
+  .syncBar i{
+    display:block; height:100%;
+    background:linear-gradient(90deg, var(--pink), var(--amber));
+    transform-origin:left center; transform:scaleX(0);
+  }
+
+  /* ---------- control deck (bottom) ---------- */
+  .deck{
+    position:fixed; z-index:10;
+    left:50%; bottom:calc(20px + var(--safe-b));
+    transform:translateX(-50%);
+    display:flex; align-items:center; gap:18px;
+    padding:12px 18px 12px 14px;
+    background:linear-gradient(180deg, var(--plate-2), var(--plate));
+    border:1px solid var(--line); border-radius:14px;
+    box-shadow:var(--plate-shadow);
+    max-width:calc(100vw - 24px);
+  }
+  .transport{ display:flex; align-items:center; gap:10px; }
+  .knob{
+    appearance:none; margin:0; padding:0; cursor:pointer;
+    width:40px; height:40px; border-radius:50%;
+    display:grid; place-items:center;
+    color:var(--text); background:var(--well);
+    border:1px solid var(--line);
+    transition:transform .08s ease, border-color .15s ease, box-shadow .15s ease;
+  }
+  .knob:hover{ border-color:var(--line-strong); }
+  .knob:active{ transform:scale(0.93); }
+  .knob svg{ width:15px; height:15px; }
+  .knob.play{
+    width:52px; height:52px;
+    color:var(--ink); background:var(--amber); border-color:var(--amber);
+    box-shadow:0 0 0 3px rgba(255,182,119,0.14), 0 0 22px rgba(255,182,119,0.32);
+  }
+  .knob.play:hover{ box-shadow:0 0 0 4px rgba(255,182,119,0.22), 0 0 30px rgba(255,182,119,0.45); }
+  .knob.play svg{ width:18px; height:18px; fill:currentColor; }
+  .knob.play.on{ background:var(--well); color:var(--amber); }
+  .divider{ width:1px; align-self:stretch; background:var(--line); }
+
+  .faders{ display:flex; gap:20px; }
+  .field{ width:132px; display:flex; flex-direction:column; gap:3px; }
+  .fieldHead{ display:flex; justify-content:space-between; align-items:baseline; }
+  .fieldHead label{ font-size:11px; color:var(--text-dim); }
+  .fieldHead output{ font-family:var(--pixel); font-size:10px; color:var(--text); }
+
+  /* sliders: a filled amber track shows the setting without reading the number */
+  input[type=range]{
+    -webkit-appearance:none; appearance:none;
+    width:100%; height:24px; margin:0; background:transparent; cursor:pointer;
+  }
+  input[type=range]:focus-visible{ outline:2px solid var(--cyan); outline-offset:2px; border-radius:4px; }
+  input[type=range]::-webkit-slider-runnable-track{
+    height:4px; border-radius:2px;
+    background:linear-gradient(90deg, var(--amber) 0 var(--fill, 50%), rgba(255,182,119,0.16) var(--fill, 50%) 100%);
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none; appearance:none;
+    width:14px; height:14px; margin-top:-5px; border-radius:50%;
+    background:var(--amber); border:2px solid var(--plate-2);
+    box-shadow:0 0 0 1px var(--amber), 0 0 10px rgba(255,182,119,0.5);
+  }
+  input[type=range]::-moz-range-track{ height:4px; border-radius:2px; background:rgba(255,182,119,0.16); }
+  input[type=range]::-moz-range-progress{ height:4px; border-radius:2px; background:var(--amber); }
+  input[type=range]::-moz-range-thumb{
+    width:10px; height:10px; border-radius:50%;
+    background:var(--amber); border:2px solid var(--plate-2);
+    box-shadow:0 0 0 1px var(--amber), 0 0 10px rgba(255,182,119,0.5);
+  }
+  .display button{ min-width:52px; }
+
+  /* ---------- arcade intro ---------- */
+  #introBackdrop{
+    position:fixed; inset:0; z-index:9997;
+    background:radial-gradient(ellipse at 50% 45%, #150512 0%, #000 75%);
+    cursor:pointer; outline:none;
+    transition:opacity .6s ease;
+  }
+  #introBackdrop.hidden{ opacity:0; pointer-events:none; }
+  #introBackdrop::before{
+    content:''; position:absolute; inset:0; pointer-events:none;
+    background:repeating-linear-gradient(to bottom, rgba(255,255,255,0.05) 0 1px, transparent 1px 3px);
+    mix-blend-mode:overlay;
+    animation:crtFlicker 6s infinite steps(60);
+  }
+  @keyframes crtFlicker{
+    0%,100%{ opacity:.9; } 8%{ opacity:.75; } 9%{ opacity:.95; }
+    52%{ opacity:.85; } 53%{ opacity:1; } 88%{ opacity:.8; }
+  }
+
+  /* the title IS the logo: one element that lives centered, then spins, shrinks and
+     glides into the corner in a single transition, pivoting from its own top-left */
+  #logoDock{
+    position:fixed; z-index:9999; pointer-events:none;
+    top:50%; left:50%;
+    transform-origin:top left;
+    transform:translate(-50%,-50%) scale(1) rotate(0deg);
+    transition:top 1.1s cubic-bezier(.5,0,.15,1), left 1.1s cubic-bezier(.5,0,.15,1), transform 1.1s cubic-bezier(.5,0,.15,1);
+  }
+  #logoDock.docked{
+    top:calc(22px + var(--safe-t)); left:24px;
+    transform:translate(0,0) scale(0.24) rotate(1080deg);
+  }
+  #logoDock.interactive{ pointer-events:auto; cursor:pointer; }
+  #logoDock.interactive:hover .introTitle{ opacity:1; }
+  /* outline is drawn pre-scale, so it's authored ~4x thick to land at ~2px */
+  #logoDock:focus-visible{ outline:8px solid var(--cyan); outline-offset:24px; }
+  #logoFloat.floating{ animation:logoBob 3.2s ease-in-out infinite; }
+  @keyframes logoBob{ 0%,100%{ transform:translateY(0); } 50%{ transform:translateY(-6px); } }
+
+  .introTitle{
+    margin:0; font-weight:normal;
+    font-family:var(--pixel);
+    text-align:center; text-transform:uppercase;
+    color:var(--amber); line-height:1.7;
+    text-shadow: -2px 0 rgba(255,80,120,0.55), 2px 0 rgba(110,220,255,0.55), 0 0 26px rgba(255,182,119,0.55), 0 0 60px rgba(255,182,119,0.25);
+    opacity:.88;
+    transition:opacity .35s ease;
+    white-space:nowrap;
+  }
+  .introTitle .t1{ display:block; font-size:clamp(16px, 3.6vw, 30px); letter-spacing:2px; }
+  .introTitle .t2{ display:block; margin-top:16px; font-size:clamp(22px, 5.4vw, 46px); letter-spacing:2px; color:#fff; }
+  .introTitle.zap{
+    opacity:1;
+    text-shadow: -3px 0 rgba(255,80,120,0.8), 3px 0 rgba(110,220,255,0.8), 0 0 40px rgba(255,182,119,0.9), 0 0 90px rgba(255,182,119,0.5);
+    animation:introShake .5s ease;
+  }
+  @keyframes introShake{
+    0%{ transform:scale(.9); } 20%{ transform:scale(1.1) translate(1px,-1px); }
+    40%{ transform:scale(1) translate(-1px,1px); } 60%{ transform:scale(1.06); } 100%{ transform:scale(1); }
+  }
+
+  .introPrompt{
+    position:fixed; z-index:9998;
+    left:50%; top:calc(50% + clamp(74px, 14vw, 112px));
+    transform:translateX(-50%);
+    text-align:center; pointer-events:none;
+  }
+  .introPrompt .press{
+    display:block;
+    font-family:var(--pixel); font-size:clamp(11px, 1.6vw, 14px);
+    letter-spacing:.08em; color:var(--text);
+    animation:introBlink 1.1s steps(1) infinite;
+  }
+  .introPrompt .sub{ display:block; margin-top:16px; font-size:12px; color:var(--text-dim); }
+  .introPrompt .skip{ display:none; font-size:12px; color:var(--text-faint); }
+  .introPrompt.playing .press, .introPrompt.playing .sub{ display:none; }
+  .introPrompt.playing .skip{ display:block; }
+  .introPrompt.gone, .introKeys.gone{ display:none; }
+  @keyframes introBlink{ 50%{ opacity:0; } }
+
+  .introKeys{
+    position:fixed; z-index:9998; left:16px; right:16px;
+    bottom:calc(30px + var(--safe-b));
+    display:flex; justify-content:center; flex-wrap:wrap; gap:8px 22px;
+    font-size:12px; color:var(--text-dim); pointer-events:none;
+  }
+  .introKeys kbd{
+    font:500 11px var(--mono); color:var(--text);
+    border:1px solid var(--line); border-radius:4px;
+    padding:1px 6px; margin-right:6px; background:var(--well);
+  }
+  .introKeys kbd + kbd{ margin-left:-2px; }
+
+  /* ---------- phones (portrait) ---------- */
+  @media (max-width:640px){
+    #logoDock.docked{ top:calc(14px + var(--safe-t)); left:14px; transform:translate(0,0) scale(.3) rotate(1080deg); }
+    .hud{
+      top:calc(52px + var(--safe-t)); left:12px; right:12px; width:auto;
+      padding:12px; gap:8px;
+      grid-template-columns:1fr auto;
+      grid-template-areas: "name toggles" "pick pick" "stats stats" "bar bar";
+    }
+    .chordName{ font-size:14px; align-self:center; min-height:0; }
+    .stats{ grid-template-columns:repeat(3, 1fr); padding-top:8px; gap:6px; }
+    .stat{ flex-direction:column; align-items:flex-start; gap:4px; }
+    .stat dt{ font-size:10px; }
+    .stat dd{ font-size:9px; }
+    .deck{
+      left:12px; right:12px; transform:none; max-width:none;
+      display:grid; grid-template-columns:auto 1fr auto;
+      grid-template-areas: "transport . display" "faders faders faders";
+      gap:12px; padding:12px;
+    }
+    .transport{ grid-area:transport; }
+    .display{ grid-area:display; align-self:center; }
+    .faders{ grid-area:faders; display:grid; grid-template-columns:repeat(3, 1fr); gap:14px; }
+    .field{ width:auto; min-width:0; }
+    .divider{ display:none; }
+    .introKeys{ display:none; }
+  }
+
+  /* ---------- short landscape (phones on their side, small laptops) ---------- */
+  @media (max-height:520px) and (min-width:641px){
+    #logoDock.docked{ top:calc(10px + var(--safe-t)); left:14px; transform:translate(0,0) scale(.2) rotate(1080deg); }
+    .hud{ top:calc(10px + var(--safe-t)); right:10px; width:236px; padding:10px 12px; gap:7px; }
+    .chordName{ font-size:14px; min-height:0; }
+    .stats{ padding-top:8px; gap:4px; }
+    .deck{ bottom:calc(8px + var(--safe-b)); padding:8px 12px 8px 10px; gap:12px; }
+    .knob.play{ width:44px; height:44px; }
+    .field{ width:108px; }
+    .faders{ gap:14px; }
+    .introKeys{ display:none; }
+  }
+
+  /* ---------- touch: bigger targets; 16px selects stop iOS zooming the page ---------- */
+  @media (pointer:coarse){
+    .sel{ font-size:16px; min-height:40px; }
+    .seg button, .chip{ min-height:40px; }
+    .knob{ width:44px; height:44px; }
+    input[type=range]{ height:36px; }
+    input[type=range]::-webkit-slider-thumb{ width:22px; height:22px; margin-top:-9px; }
+    input[type=range]::-moz-range-thumb{ width:18px; height:18px; }
+  }
+
+  @media (prefers-reduced-motion:reduce){
+    #logoDock{ transition:top .5s ease, left .5s ease, transform .5s ease; }
+    #logoDock.docked{ transform:translate(0,0) scale(.24); }
+    #logoFloat.floating, .introTitle.zap, .chordName.zap, #introBackdrop::before, .introPrompt .press{ animation:none; }
+  }
+  @media (prefers-reduced-motion:reduce) and (max-width:640px){
+    #logoDock.docked{ transform:translate(0,0) scale(.3); }
+  }
+  @media (prefers-reduced-motion:reduce) and (max-height:520px) and (min-width:641px){
+    #logoDock.docked{ transform:translate(0,0) scale(.2); }
+  }
+</style>
+</head>
+<body>
+
+<div id="introBackdrop" role="button" tabindex="0" aria-label="Press start"></div>
+
+<div id="logoDock" title="Replay intro" aria-label="Replay intro">
+  <div id="logoFloat">
+    <h1 class="introTitle" id="introTitle">
+      <span class="t1">THE DAWKINATORS</span>
+      <span class="t2">FUN MACHINE 5000</span>
+    </h1>
+  </div>
+</div>
+
+<div class="introPrompt" id="introPrompt" aria-hidden="true">
+  <span class="press" id="pressLabel">PRESS START</span>
+  <span class="sub">sound on</span>
+  <span class="skip" id="skipLabel">press again to skip</span>
+</div>
+
+<div class="introKeys" id="introKeys" aria-hidden="true">
+  <span><kbd>space</kbd>play / pause</span>
+  <span><kbd>&larr;</kbd><kbd>&rarr;</kbd>root</span>
+  <span><kbd>&uarr;</kbd><kbd>&darr;</kbd>chord</span>
+  <span><kbd>n</kbd>numbers</span>
+  <span><kbd>c</kbd>chromatic</span>
+</div>
+
+<div class="crt" aria-hidden="true"></div>
+
+<div id="stage">
+  <canvas id="canvas" role="img" aria-label="A ring of voices orbiting at different speeds; each plays a note as it crosses the marker at the top"></canvas>
+</div>
+
+<section class="hud" id="hud" aria-label="Chord">
+  <div class="chordName" id="chordName" aria-live="polite">Cmaj13</div>
+  <div class="pick">
+    <select class="sel" id="rootSelect" aria-label="Root note" title="Root note (left/right arrows)"></select>
+    <select class="sel" id="qualitySelect" aria-label="Chord type" title="Chord type (up/down arrows)"></select>
+  </div>
+  <div class="toggles">
+    <div class="seg spell" role="group" aria-label="Note spelling">
+      <button type="button" data-spell="sharp" aria-pressed="true" title="Spell notes with sharps">&#9839;</button><button type="button" data-spell="flat" aria-pressed="false" title="Spell notes with flats">&#9837;</button>
+    </div>
+    <button type="button" class="chip" id="chromaticBtn" aria-pressed="false" title="Play all twelve notes (C)">chromatic</button>
+  </div>
+  <dl class="stats">
+    <div class="stat"><dt>hits</dt><dd id="hitCount">0</dd></div>
+    <div class="stat"><dt>cycle</dt><dd id="cycleCount">1</dd></div>
+    <div class="stat"><dt>next sync</dt><dd id="syncCountdown">2:30</dd></div>
+  </dl>
+  <div class="syncBar" aria-hidden="true"><i id="syncFill"></i></div>
+</section>
+
+<div class="deck" id="deck" role="group" aria-label="Controls">
+  <div class="transport">
+    <button type="button" class="knob" id="resetBtn" aria-label="Reset" title="Reset: back to the top, counts cleared">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+    </button>
+    <button type="button" class="knob play" id="playBtn" aria-label="Play" aria-pressed="false" title="Play (space)">
+      <svg id="playIcon" viewBox="0 0 24 24" aria-hidden="true"><polygon points="7,4 20,12 7,20"/></svg>
+      <svg id="pauseIcon" viewBox="0 0 24 24" aria-hidden="true" style="display:none"><rect x="5" y="4" width="5" height="16"/><rect x="14" y="4" width="5" height="16"/></svg>
+    </button>
+  </div>
+  <div class="divider" aria-hidden="true"></div>
+  <div class="faders">
+    <div class="field">
+      <div class="fieldHead"><label for="voicesSlider">voices</label><output id="voicesVal" for="voicesSlider">50</output></div>
+      <input type="range" id="voicesSlider" min="1" max="150" step="1" value="50">
+    </div>
+    <div class="field">
+      <div class="fieldHead"><label for="bpmSlider">tempo</label><output id="bpmVal" for="bpmSlider">60</output></div>
+      <input type="range" id="bpmSlider" min="20" max="320" step="1" value="60">
+    </div>
+    <div class="field">
+      <div class="fieldHead"><label for="volSlider">volume</label><output id="volVal" for="volSlider">70</output></div>
+      <input type="range" id="volSlider" min="0" max="100" step="1" value="70">
+    </div>
+  </div>
+  <div class="divider" aria-hidden="true"></div>
+  <div class="seg display" role="group" aria-label="Show voices as">
+    <button type="button" data-display="dots" aria-pressed="true" title="Show voices as dots (N)">&bull;&thinsp;&bull;&thinsp;&bull;</button><button type="button" data-display="numbers" aria-pressed="false" title="Show each voice's hit count (N)">123</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  const $ = (id) => document.getElementById(id);
+  const TAU = Math.PI * 2;
+  const mq = (q) => (window.matchMedia ? window.matchMedia(q) : { matches: false });
+  const mqReduce = mq('(prefers-reduced-motion: reduce)');
+  const mqCoarse = mq('(pointer: coarse)');
+  const hasSpeech = 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window;
+
+  // ---------- DOM ----------
+  const backdrop = $('introBackdrop'), dockEl = $('logoDock'), floatEl = $('logoFloat'), titleEl = $('introTitle');
+  const promptEl = $('introPrompt'), keysEl = $('introKeys');
+  const hud = $('hud'), deck = $('deck'), canvas = $('canvas');
+  const chordNameEl = $('chordName'), rootSelect = $('rootSelect'), qualitySelect = $('qualitySelect');
+  const chromaticBtn = $('chromaticBtn');
+  const hitCountEl = $('hitCount'), cycleCountEl = $('cycleCount'), syncCountdownEl = $('syncCountdown'), syncFillEl = $('syncFill');
+  const playBtn = $('playBtn'), playIcon = $('playIcon'), pauseIcon = $('pauseIcon'), resetBtn = $('resetBtn');
+  const voicesSlider = $('voicesSlider'), voicesVal = $('voicesVal');
+  const bpmSlider = $('bpmSlider'), bpmVal = $('bpmVal');
+  const volSlider = $('volSlider'), volVal = $('volVal');
+  const spellBtns = Array.from(document.querySelectorAll('[data-spell]'));
+  const displayBtns = Array.from(document.querySelectorAll('[data-display]'));
+
+  // ---------- constants ----------
+  const BEATS_PER_CYCLE = 150;         // one master cycle, in beats — long enough that even the fastest voice orbits calmly
+  const SCHEDULE_AHEAD = 0.15;         // seconds of audio look-ahead
+  const SCHEDULE_AHEAD_HIDDEN = 1.25;  // background tabs throttle timers to ~1 Hz: look further ahead so notes don't drop
+  const LOOKAHEAD_MS = 25;             // scheduler tick interval
+  const STALE = 0.04;                  // an event this far in the past is skipped, never played late
+  const TONE_ATTACK = 0.006;
+  const GROUP_EPS = 0.014;             // events within this window count as "simultaneous"
+  const FLASH_DURATION = 0.34;         // per-ticker flash
+  const PULSE_DURATION = 0.85;         // shared trigger-point pulse
+  const MIN_VOICES = 1;
+  const GROWTH_CAP = 150;              // hard ceiling for voices, grown or dialed in
+  const MAX_POLYPHONY = 160;           // tones sounding at once; beyond this, visuals still fire but audio sheds load
+  const LOW_MIDI = 36;                 // C2 — lowest note the ladder starts from (root is added on top)
+  const HIGH_MIDI = 96;                // C7 — the ladder folds back down here instead of climbing out of hearing
+  const COMBO_MIN = 6;                 // this many voices landing together earns a callout
+
+  // ---------- chord system: 12 roots × every quality, plus chromatic ----------
+  // pixel-font labels use ASCII (# / b) because Press Start 2P has no ♯/♭ glyphs;
+  // the dropdowns use the real symbols
+  const ROOTS = [
+    { sharp:'C',       flat:'C',       sa:'C',  fa:'C',  pc:0 },
+    { sharp:'C\u266f', flat:'D\u266d', sa:'C#', fa:'Db', pc:1 },
+    { sharp:'D',       flat:'D',       sa:'D',  fa:'D',  pc:2 },
+    { sharp:'D\u266f', flat:'E\u266d', sa:'D#', fa:'Eb', pc:3 },
+    { sharp:'E',       flat:'E',       sa:'E',  fa:'E',  pc:4 },
+    { sharp:'F',       flat:'F',       sa:'F',  fa:'F',  pc:5 },
+    { sharp:'F\u266f', flat:'G\u266d', sa:'F#', fa:'Gb', pc:6 },
+    { sharp:'G',       flat:'G',       sa:'G',  fa:'G',  pc:7 },
+    { sharp:'G\u266f', flat:'A\u266d', sa:'G#', fa:'Ab', pc:8 },
+    { sharp:'A',       flat:'A',       sa:'A',  fa:'A',  pc:9 },
+    { sharp:'A\u266f', flat:'B\u266d', sa:'A#', fa:'Bb', pc:10 },
+    { sharp:'B',       flat:'B',       sa:'B',  fa:'B',  pc:11 }
+  ];
+
+  // intervals above the root, ascending — voices ladder up through them tone by tone
+  const QUALITIES = {
+    maj:   { name:'Major',            label:'',     intervals:[0,4,7] },
+    min:   { name:'Minor',            label:'m',    intervals:[0,3,7] },
+    dim:   { name:'Diminished',       label:'dim',  intervals:[0,3,6] },
+    aug:   { name:'Augmented',        label:'aug',  intervals:[0,4,8] },
+    sus2:  { name:'Sus 2',            label:'sus2', intervals:[0,2,7] },
+    sus4:  { name:'Sus 4',            label:'sus4', intervals:[0,5,7] },
+    six:   { name:'Major 6',          label:'6',    intervals:[0,4,7,9] },
+    m6:    { name:'Minor 6',          label:'m6',   intervals:[0,3,7,9] },
+    dom7:  { name:'Dominant 7',       label:'7',    intervals:[0,4,7,10] },
+    maj7:  { name:'Major 7',          label:'maj7', intervals:[0,4,7,11] },
+    m7:    { name:'Minor 7',          label:'m7',   intervals:[0,3,7,10] },
+    m7b5:  { name:'Half-diminished',  label:'m7b5', intervals:[0,3,6,10] },
+    dim7:  { name:'Diminished 7',     label:'dim7', intervals:[0,3,6,9] },
+    add9:  { name:'Add 9',            label:'add9', intervals:[0,2,4,7] },
+    dom9:  { name:'Dominant 9',       label:'9',    intervals:[0,2,4,7,10] },
+    maj9:  { name:'Major 9',          label:'maj9', intervals:[0,2,4,7,11] },
+    m9:    { name:'Minor 9',          label:'m9',   intervals:[0,2,3,7,10] },
+    dom11: { name:'Dominant 11',      label:'11',   intervals:[0,2,4,5,7,10] },
+    m11:   { name:'Minor 11',         label:'m11',  intervals:[0,2,3,5,7,10] },
+    dom13: { name:'Dominant 13',      label:'13',   intervals:[0,2,4,7,9,10] },
+    maj13: { name:'Major 13',         label:'maj13',intervals:[0,2,4,7,9,11] },
+    m13:   { name:'Minor 13',         label:'m13',  intervals:[0,2,3,5,7,9,10] }
+  };
+  const QUALITY_GROUPS = [
+    ['Triads',   ['maj','min','dim','aug','sus2','sus4']],
+    ['Sixths',   ['six','m6']],
+    ['Sevenths', ['dom7','maj7','m7','m7b5','dim7']],
+    ['Extended', ['add9','dom9','maj9','m9','dom11','m11','dom13','maj13','m13']]
+  ];
+  const QUALITY_ORDER = QUALITY_GROUPS.flatMap(([, keys]) => keys);
+  const CHROMATIC = [0,1,2,3,4,5,6,7,8,9,10,11];
+
+  let rootIndex = 0;
+  let qualityKey = 'maj13';
+  let spelling = 'sharp';      // naming only — never touches pitch
+  let isChromatic = false;
+  let currentChord = { label:'', intervals:[], rootPc:0 };
+  let ladder = [];             // every chord tone from the root (octave 2) up to HIGH_MIDI
+
+  function chordLabel(){
+    if (isChromatic) return 'Chromatic';
+    const root = ROOTS[rootIndex];
+    return (spelling === 'sharp' ? root.sa : root.fa) + QUALITIES[qualityKey].label;
+  }
+
+  function recomputeChord(){
+    const root = ROOTS[rootIndex];
+    const intervals = isChromatic ? CHROMATIC : QUALITIES[qualityKey].intervals;
+    currentChord = { label: chordLabel(), intervals, rootPc: root.pc };
+    ladder = [];
+    for (let oct = 0; oct < 10; oct++){
+      for (const iv of intervals){
+        const m = LOW_MIDI + root.pc + oct*12 + iv;
+        if (m > HIGH_MIDI) return;
+        ladder.push(m);
+      }
+    }
+  }
+
+  // voice i walks the ladder upward, then folds back down (ping-pong) instead of
+  // climbing past hearing — so voice 1 is always the root and neighbours stay close
+  function noteForIndex(i){
+    const L = ladder.length;
+    if (L <= 1) return ladder[0] || LOW_MIDI;
+    const period = 2 * (L - 1);
+    const p = i % period;
+    return ladder[p < L ? p : period - p];
+  }
+
+  function freqFromMidi(m){ return 440 * Math.pow(2, (m - 69) / 12); }
+  function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
+
+  // color cycles on a fixed period so a voice's color never shifts when voices are
+  // added above it — orange -> red -> pink -> violet -> cyan, never green/yellow
+  const HUE_PERIOD = 50;
+  function hueForIndex(i){
+    const t = (i % HUE_PERIOD) / HUE_PERIOD;
+    const h = 28 - 198 * t;
+    return ((h % 360) + 360) % 360;
+  }
+  // spread voices across the stereo field; the root stays dead center
+  function panForIndex(i){
+    if (i === 0) return 0;
+    return (((i * 0.6180339887) % 1) - 0.5) * 1.1;
+  }
+
+  recomputeChord();
+
+  // ---------- audio ----------
+  let audioCtx = null, masterGain = null, instBus = null, toneWave = null;
+  let canPan = false;
+  const sounding = new Set();
+
+  function volumeToGain(v){ return Math.pow(v / 100, 1.6) * 0.9; }
+
+  function softClipCurve(){
+    const n = 2048, c = new Float32Array(n);
+    for (let i = 0; i < n; i++){ const x = (i / (n - 1)) * 2 - 1; c[i] = Math.tanh(1.4 * x) / Math.tanh(1.4); }
+    return c;
+  }
+
+  function buildImpulseResponse(ctx, duration, decay){
+    const rate = ctx.sampleRate;
+    const length = Math.floor(rate * duration);
+    const buf = ctx.createBuffer(2, length, rate);
+    for (let ch = 0; ch < 2; ch++){
+      const data = buf.getChannelData(ch);
+      for (let i = 0; i < length; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
+    }
+    return buf;
+  }
+
+  // master chain: instrument bus (+ room) and fanfare bus -> volume -> limiter -> soft clip.
+  // The soft clip catches what the compressor lets through when all voices land at once.
+  function ensureAudio(){
+    if (audioCtx) return;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    try { audioCtx = new AC({ latencyHint: 'interactive' }); } catch (e) { audioCtx = new AC(); }
+    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}  // iOS: play through the silent switch
+
+    masterGain = audioCtx.createGain();
+    masterGain.gain.value = volumeToGain(parseFloat(volSlider.value));
+    const limiter = audioCtx.createDynamicsCompressor();
+    limiter.threshold.value = -12; limiter.knee.value = 6; limiter.ratio.value = 12;
+    limiter.attack.value = 0.002; limiter.release.value = 0.18;
+    const clipper = audioCtx.createWaveShaper();
+    clipper.curve = softClipCurve(); clipper.oversample = '2x';
+    masterGain.connect(limiter); limiter.connect(clipper); clipper.connect(audioCtx.destination);
+
+    instBus = audioCtx.createGain(); instBus.gain.value = 0.6;
+    instBus.connect(masterGain);
+    const roomTone = audioCtx.createBiquadFilter(); roomTone.type = 'lowpass'; roomTone.frequency.value = 3200;
+    const room = audioCtx.createConvolver(); room.buffer = buildImpulseResponse(audioCtx, 1.9, 3.2);
+    const roomLevel = audioCtx.createGain(); roomLevel.gain.value = 0.2;
+    instBus.connect(roomTone); roomTone.connect(room); room.connect(roomLevel); roomLevel.connect(masterGain);
+
+    // a mellow mallet: fundamental plus a whisper of overtones, so the low voices
+    // still read on laptop and phone speakers
+    toneWave = audioCtx.createPeriodicWave(new Float32Array([0,0,0,0,0]), new Float32Array([0,1,0.24,0.08,0.03]));
+    canPan = typeof audioCtx.createStereoPanner === 'function';
+  }
+
+  function resumeAudio(){ if (audioCtx && audioCtx.state !== 'running') audioCtx.resume().catch(() => {}); }
+
+  function playTone(freq, time, n, pan){
+    if (!audioCtx || sounding.size >= MAX_POLYPHONY) return;
+    const osc = audioCtx.createOscillator();
+    osc.setPeriodicWave(toneWave);
+    osc.frequency.setValueAtTime(freq, time);
+    const g = audioCtx.createGain();
+    // slow voices ring longer and louder; fast voices are short ticks. Very high notes
+    // are trimmed a touch so the top of the ladder doesn't glare.
+    const decay = clamp(0.62 - n * 0.006, 0.16, 0.62) * (freq < 200 ? 1.25 : 1);
+    const peak = clamp(0.5 / Math.sqrt(n), 0.06, 0.5) * (freq > 1400 ? 0.7 : 1);
+    g.gain.setValueAtTime(0, time);
+    g.gain.linearRampToValueAtTime(peak, time + TONE_ATTACK);
+    g.gain.exponentialRampToValueAtTime(0.0006, time + TONE_ATTACK + decay);
+    osc.connect(g);
+    let out = g;
+    if (canPan && pan){
+      const p = audioCtx.createStereoPanner();
+      p.pan.value = pan;
+      g.connect(p); out = p;
+    }
+    out.connect(instBus);
+    osc.start(time);
+    osc.stop(time + TONE_ATTACK + decay + 0.03);
+    sounding.add(osc);
+    osc.onended = () => {
+      sounding.delete(osc);
+      try { osc.disconnect(); g.disconnect(); if (out !== g) out.disconnect(); } catch (e) {}
+    };
+  }
+
+  // fade instead of hard-stopping, so a reset doesn't click
+  function silenceTones(){
+    if (!audioCtx) return;
+    const now = audioCtx.currentTime;
+    instBus.gain.cancelScheduledValues(now);
+    instBus.gain.setValueAtTime(instBus.gain.value, now);
+    instBus.gain.linearRampToValueAtTime(0, now + 0.05);
+    for (const osc of sounding){ try { osc.stop(now + 0.06); } catch (e) {} }
+    instBus.gain.setValueAtTime(0.6, now + 0.08);
+  }
+
+  // ---------- arcade fanfare: crusher -> dry + echo + reverb ----------
+  let introFX = null;
+
+  // bit-depth crush as a native WaveShaper staircase: same crunch as before, but it runs
+  // on the audio thread instead of a main-thread ScriptProcessor that never stops
+  function crushCurve(bits){
+    const n = 4096, steps = Math.pow(2, bits) / 2, c = new Float32Array(n);
+    for (let i = 0; i < n; i++){ const x = (i / (n - 1)) * 2 - 1; c[i] = Math.round(x * steps) / steps; }
+    return c;
+  }
+
+  function ensureIntroFX(){
+    ensureAudio();
+    if (introFX) return introFX;
+    const crusher = audioCtx.createWaveShaper(); crusher.curve = crushCurve(5); crusher.oversample = 'none';
+    const dry = audioCtx.createGain(); dry.gain.value = 0.9;
+    const delay = audioCtx.createDelay(1.0); delay.delayTime.value = 0.24;
+    const feedback = audioCtx.createGain(); feedback.gain.value = 0.34;
+    const delaySend = audioCtx.createGain(); delaySend.gain.value = 0.5;
+    const verb = audioCtx.createConvolver(); verb.buffer = buildImpulseResponse(audioCtx, 2.4, 2.6);
+    const verbSend = audioCtx.createGain(); verbSend.gain.value = 0.38;
+    crusher.connect(dry); dry.connect(masterGain);
+    crusher.connect(delay); delay.connect(feedback); feedback.connect(delay);
+    delay.connect(delaySend); delaySend.connect(masterGain);
+    crusher.connect(verb); verb.connect(verbSend); verbSend.connect(masterGain);
+    introFX = { input: crusher };
+    return introFX;
+  }
+
+  function fxNote(freq, time, dur, type, peak){
+    const fx = ensureIntroFX();
+    const osc = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    osc.type = type; osc.frequency.setValueAtTime(freq, time);
+    g.gain.setValueAtTime(0, time);
+    g.gain.linearRampToValueAtTime(peak, time + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0008, time + dur);
+    osc.connect(g); g.connect(fx.input);
+    osc.start(time); osc.stop(time + dur + 0.05);
+    osc.onended = () => { try { osc.disconnect(); g.disconnect(); } catch (e) {} };
+  }
+
+  function noiseBurst(t0, dur, peak){
+    const fx = ensureIntroFX();
+    const rate = audioCtx.sampleRate;
+    const length = Math.max(1, Math.floor(rate * dur));
+    const buf = audioCtx.createBuffer(1, length, rate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < length; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, 2.2);
+    const src = audioCtx.createBufferSource(); src.buffer = buf;
+    const g = audioCtx.createGain();
+    g.gain.setValueAtTime(peak, t0);
+    g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+    src.connect(g); g.connect(fx.input);
+    src.start(t0);
+    src.onended = () => { try { src.disconnect(); g.disconnect(); } catch (e) {} };
+  }
+
+  function playArcadeFanfare(t0){
+    fxNote(65.4, t0, 0.5, 'sine', 0.55);                                   // sub thump
+    const arp = [130.8, 164.8, 196.0, 261.6];                              // C3 E3 G3 C4
+    arp.forEach((f, i) => fxNote(f, t0 + i * 0.09, 0.22, 'square', 0.32));
+    const chordAt = t0 + arp.length * 0.09 + 0.05;                         // power-chord stab
+    [130.8, 196.0, 261.6, 329.6].forEach((f) => fxNote(f, chordAt, 1.0, 'sawtooth', 0.22));
+  }
+
+  function fxWordHit(freq){
+    const t = audioCtx.currentTime + 0.01;
+    fxNote(freq, t, 0.22, 'square', 0.42);
+    fxNote(freq / 2, t, 0.32, 'sine', 0.32);
+  }
+
+  function playFightStinger(t0){
+    noiseBurst(t0, 0.35, 0.55);
+    fxNote(523.2, t0, 0.3, 'square', 0.3);
+    fxNote(65.4, t0, 0.6, 'sine', 0.6);
+  }
+
+  // ---------- announcer (Web Speech) ----------
+  // Browser TTS can't be routed through Web Audio, so the voice itself is dry;
+  // all the crunch/echo lives on the fanfare and stabs around it.
+  let cachedVoices = [];
+  function refreshVoices(){ try { cachedVoices = speechSynthesis.getVoices() || []; } catch (e) {} }
+  if (hasSpeech){
+    refreshVoices();
+    if (speechSynthesis.addEventListener) speechSynthesis.addEventListener('voiceschanged', refreshVoices);
+    else speechSynthesis.onvoiceschanged = refreshVoices;
+  }
+
+  function pickAnnouncerVoice(){
+    if (!cachedVoices.length) refreshVoices();
+    const voices = cachedVoices;
+    if (!voices.length) return null;
+    const maleNames = /\b(daniel|david|alex|fred|guy|mark|arthur|oliver|george|male)\b/i;
+    const femaleNames = /female|samantha|victoria|karen|susan|zira|moira|tessa|fiona/i;
+    return voices.find((v) => maleNames.test(v.name) && !femaleNames.test(v.name) && /^en/i.test(v.lang)) ||
+           voices.find((v) => maleNames.test(v.name) && !femaleNames.test(v.name)) ||
+           voices.find((v) => /^en/i.test(v.lang) && !femaleNames.test(v.name)) ||
+           voices[0];
+  }
+
+  function makeUtterance(text, { pitch = 0.28, rate = 1.1, volume = 1 } = {}){
+    const u = new SpeechSynthesisUtterance(text);
+    const v = pickAnnouncerVoice();
+    if (v){ u.voice = v; u.lang = v.lang; }
+    u.pitch = pitch; u.rate = rate; u.volume = volume;
+    return u;
+  }
+
+  // iOS only lets speech start inside a user gesture; a silent line spoken in the
+  // click handler unlocks the later, timed announcer lines
+  function primeSpeech(){
+    if (!hasSpeech) return;
+    try {
+      if (speechSynthesis.paused) speechSynthesis.resume();
+      const u = new SpeechSynthesisUtterance(' ');
+      u.volume = 0;
+      speechSynthesis.speak(u);
+    } catch (e) {}
+  }
+
+  function shout(text){
+    if (!hasSpeech) return;
+    try { speechSynthesis.speak(makeUtterance(text, { pitch: 0.28, rate: 1.05 })); } catch (e) {}
+  }
+
+  // ---------- intro state machine: idle -> playing -> docked ----------
+  let introState = 'idle';
+  let introSession = 0;        // bumps on skip/replay so stale speech callbacks can't fire
+  let introTimers = [];
+  let firstRun = true;
+  let resumeAfterReplay = false;
+
+  function clearIntroTimers(){ introTimers.forEach(clearTimeout); introTimers = []; }
+
+  function announceTitle(session){
+    const live = () => session === introSession && introState === 'playing';
+    const done = () => { if (live()) finishIntro(); };
+    if (!hasSpeech){ introTimers.push(setTimeout(done, 1500)); return; }
+
+    const lines = ['DAWKINATORS!', 'FUN MACHINE!', 'FIVE THOUSAND!'];
+    const stabFreqs = [130.8, 196.0, 261.6];
+    const utterances = lines.map((text, i) => {
+      const u = makeUtterance(text);
+      u.onstart = () => { if (live()) fxWordHit(stabFreqs[i]); };
+      return u;
+    });
+    let tailed = false;
+    const tail = () => {
+      if (tailed || !live()) return;
+      tailed = true;
+      playFightStinger(audioCtx.currentTime + 0.05);
+      const echo = makeUtterance('...thousand!', { pitch: 0.26, rate: 1.25, volume: 0.4 });
+      echo.onend = echo.onerror = () => { if (live()) introTimers.push(setTimeout(done, 400)); };
+      speechSynthesis.speak(echo);
+    };
+    const last = utterances[utterances.length - 1];
+    last.onend = last.onerror = tail;
+    utterances.forEach((u) => speechSynthesis.speak(u));
+  }
+
+  function setChromeInert(on){
+    for (const el of [hud, deck]){
+      if (on) el.setAttribute('inert', ''); else el.removeAttribute('inert');
+    }
+  }
+
+  function startIntro(){
+    if (introState !== 'idle') return;
+    introState = 'playing';
+    const session = ++introSession;
+    ensureAudio(); ensureIntroFX(); resumeAudio();
+    primeSpeech();
+
+    titleEl.classList.remove('zap'); void titleEl.offsetWidth; titleEl.classList.add('zap');
+    promptEl.classList.add('playing');
+    keysEl.classList.add('gone');
+
+    playArcadeFanfare(audioCtx.currentTime + 0.02);
+    introTimers.push(setTimeout(() => announceTitle(session), 550));
+    introTimers.push(setTimeout(() => { if (session === introSession) finishIntro(); }, 7000)); // speech never reported back
+  }
+
+  function skipIntro(){
+    if (introState !== 'playing') return;
+    introSession++;
+    if (hasSpeech){ try { speechSynthesis.cancel(); } catch (e) {} }
+    finishIntro();
+  }
+
+  function finishIntro(){
+    if (introState !== 'playing') return;
+    introState = 'docked';
+    clearIntroTimers();
+
+    backdrop.classList.add('hidden');
+    promptEl.classList.add('gone');
+    introTimers.push(setTimeout(() => { if (introState === 'docked') backdrop.style.display = 'none'; }, 650));
+
+    dockEl.classList.add('docked');
+    let settled = false;
+    const settle = () => {
+      if (settled || introState !== 'docked') return;
+      settled = true;
+      floatEl.classList.add('floating');
+      dockEl.classList.add('interactive');
+      dockEl.setAttribute('role', 'button');
+      dockEl.tabIndex = 0;
+    };
+    dockEl.addEventListener('transitionend', settle, { once: true });
+    introTimers.push(setTimeout(settle, 1300));
+
+    setChromeInert(false);
+    // the machine comes alive the moment the logo lands; a replay resumes what was playing
+    if ((firstRun || resumeAfterReplay) && !clock.playing) togglePlay();
+    firstRun = false;
+    resumeAfterReplay = false;
+  }
+
+  function replayIntro(){
+    if (introState !== 'docked') return;
+    clearIntroTimers();
+    resumeAfterReplay = clock.playing;
+    if (clock.playing) togglePlay();
+
+    introState = 'idle';
+    floatEl.classList.remove('floating');
+    dockEl.classList.remove('interactive', 'docked');
+    dockEl.removeAttribute('role');
+    dockEl.tabIndex = -1;
+    backdrop.style.display = '';
+    void backdrop.offsetWidth;
+    backdrop.classList.remove('hidden');
+    promptEl.classList.remove('gone');
+    setChromeInert(true);
+    startIntro();  // the click that asked for the replay is the gesture — no second press needed
+  }
+
+  backdrop.addEventListener('click', () => {
+    if (introState === 'idle') startIntro();
+    else if (introState === 'playing') skipIntro();
+  });
+  dockEl.addEventListener('click', replayIntro);
+  dockEl.addEventListener('keydown', (e) => {
+    if (introState === 'docked' && (e.key === 'Enter' || e.key === ' ')){ e.preventDefault(); e.stopPropagation(); replayIntro(); }
+  });
+
+  // ---------- master clock ----------
+  // Every position and event time derives from audioCtx.currentTime, not rAF — dropped
+  // frames delay what's drawn but never touch the schedule.
+  const clock = { baseTime: 0, baseCycle: 0, pausedCycle: 0, cyclesPerSecond: 60 / (60 * BEATS_PER_CYCLE), playing: false };
+  let baseBpm = 60;
+
+  function bpmToCPS(bpm){ return bpm / (60 * BEATS_PER_CYCLE); }
+  function cycleAtTime(t){
+    if (!clock.playing) return clock.pausedCycle;
+    return clock.baseCycle + (t - clock.baseTime) * clock.cyclesPerSecond;
+  }
+  function timeAtCycle(c){ return clock.baseTime + (c - clock.baseCycle) / clock.cyclesPerSecond; }
+  function audioNow(){ return audioCtx ? audioCtx.currentTime : 0; }
+
+  function setBpm(bpm){
+    if (audioCtx && clock.playing){
+      const now = audioCtx.currentTime;
+      clock.baseCycle = cycleAtTime(now);
+      clock.baseTime = now;
+    }
+    clock.cyclesPerSecond = bpmToCPS(bpm);
+  }
+  function setBaseBpm(bpm){ baseBpm = bpm; setBpm(bpm); }
+
+  function startClock(delay){
+    ensureAudio(); resumeAudio();
+    clock.baseTime = audioCtx.currentTime + (delay || 0);
+    clock.baseCycle = clock.pausedCycle;
+    clock.playing = true;
+  }
+  function pauseClock(){
+    if (!audioCtx) return;
+    clock.pausedCycle = cycleAtTime(audioCtx.currentTime);
+    clock.playing = false;
+  }
+  function resetClock(){
+    clock.baseCycle = 0; clock.pausedCycle = 0;
+    clock.baseTime = audioNow();
+    clock.playing = false;
+  }
+
+  // ---------- voices ----------
+  // Voices are edited in place: dialing the count, changing chord, or growing on a
+  // sync never rebuilds existing voices, so rhythm position and hit counts survive.
+  function makeLayer(i, startCycle){
+    const n = i + 1;
+    // mid-playback, a new voice waits for its next natural crossing instead of jumping
+    const nextEventCycle = startCycle > 0 ? Math.ceil(startCycle * n - 1e-9) / n : 0;
+    return {
+      n,
+      freq: freqFromMidi(noteForIndex(i)),
+      hue: hueForIndex(i),
+      pan: panForIndex(i),
+      hitCount: 0,
+      nextEventCycle,
+      lastFireTime: -999,
+      spawnAt: -999,
+      dispR: null,
+      x: 0, y: 0, angle: 0
+    };
+  }
+
+  // full rebuild — used by Reset. When given previous layers, each surviving position
+  // keeps its hitCount and lastFireTime; only genuinely new positions start fresh.
+  function buildLayers(startCycle, previousLayers, count){
+    const out = [];
+    for (let i = 0; i < count; i++){
+      const layer = makeLayer(i, startCycle);
+      const prev = previousLayers && previousLayers[i];
+      if (prev){ layer.hitCount = prev.hitCount; layer.lastFireTime = prev.lastFireTime; }
+      out.push(layer);
+    }
+    return out;
+  }
+
+  let userVoiceCount = 50;               // what the player dialed in; Reset returns here
+  let layers = buildLayers(0, null, userVoiceCount);
+  let nextSyncCycle = 1;
+  let syncCount = 0;
+  let totalHits = 0;
+  let eventQueue = [];
+  let pulses = [];
+  let popups = [];
+  let schedulerTimer = null;
+
+  // counts of voices taken away by the slider, by position — bring a position back
+  // and its number picks up where it left off instead of restarting at 1
+  let retiredCounts = [];
+  function revive(layer, i){
+    if (retiredCounts[i] != null) layer.hitCount = retiredCounts[i];
+    return layer;
+  }
+
+  function setVoiceCount(count){
+    count = clamp(Math.round(count), MIN_VOICES, GROWTH_CAP);
+    if (count === layers.length) return;
+    const curCycle = cycleAtTime(audioNow());
+    if (count < layers.length){
+      for (let i = count; i < layers.length; i++) retiredCounts[i] = layers[i].hitCount;
+      layers.length = count;
+    } else {
+      for (let i = layers.length; i < count; i++) layers.push(revive(makeLayer(i, curCycle), i));
+    }
+    requestGeometry();
+  }
+
+  function retuneLayers(){
+    for (let i = 0; i < layers.length; i++) layers[i].freq = freqFromMidi(noteForIndex(i));
+  }
+
+  // ---------- scheduler ----------
+  function queueEvent(ev){
+    // hidden tabs don't draw, so apply bookkeeping now instead of piling up events
+    if (document.hidden) applyEvent(ev, performance.now() / 1000, false);
+    else eventQueue.push(ev);
+  }
+
+  function schedulerTick(){
+    if (!clock.playing || !audioCtx) return;
+    const now = audioCtx.currentTime;
+    const horizon = now + (document.hidden ? SCHEDULE_AHEAD_HIDDEN : SCHEDULE_AHEAD);
+
+    // master-cycle boundaries: every voice lines up at the top. Count the sync and grow
+    // one voice — added to the ring before the loop below, so its first note is scheduled
+    // exactly on the boundary like everyone else's
+    while (true){
+      const t = timeAtCycle(nextSyncCycle);
+      if (t > horizon) break;
+      let born = null;
+      if (layers.length < GROWTH_CAP){
+        born = revive(makeLayer(layers.length, 0), layers.length);
+        born.nextEventCycle = nextSyncCycle;
+        layers.push(born);
+      }
+      queueEvent({ time: t, type: 'sync', born });
+      nextSyncCycle++;
+    }
+
+    const curCycle = cycleAtTime(now);
+    for (const layer of layers){
+      // if the timer stalled far behind, skip the missed crossings rather than bursting them
+      if (timeAtCycle(layer.nextEventCycle) < now - STALE){
+        layer.nextEventCycle = Math.ceil(curCycle * layer.n - 1e-9) / layer.n;
+      }
+      let guard = 0;
+      while (guard++ < 64){
+        const t = timeAtCycle(layer.nextEventCycle);
+        if (t > horizon) break;
+        playTone(layer.freq, t, layer.n, layer.pan);
+        queueEvent({ time: t, type: 'hit', layer });
+        layer.nextEventCycle += 1 / layer.n;
+      }
+    }
+  }
+
+  function startScheduler(){ stopScheduler(); schedulerTick(); schedulerTimer = setInterval(schedulerTick, LOOKAHEAD_MS); }
+  function stopScheduler(){ if (schedulerTimer){ clearInterval(schedulerTimer); schedulerTimer = null; } }
+
+  function applyEvent(ev, vnow, visible){
+    if (ev.type === 'hit'){
+      ev.layer.hitCount++;
+      ev.layer.lastFireTime = ev.time;
+      totalHits++;
+    } else if (ev.type === 'sync'){
+      syncCount++;
+      if (ev.born){
+        ev.born.spawnAt = vnow;
+        showVoiceCount(layers.length);
+      }
+      if (visible){
+        addPopup('SYNC!', 'big', vnow);
+        if (ev.born) addPopup('+1 VOICE', 'sub', vnow);
+      }
+    }
+  }
+
+  let lastComboAt = -9;
+  function processEvents(now, vnow){
+    if (!eventQueue.length) return;
+    const fired = [];
+    const keep = [];
+    for (const ev of eventQueue) (ev.time <= now ? fired : keep).push(ev);
+    if (!fired.length) return;
+    eventQueue = keep;
+    fired.sort((a, b) => a.time - b.time);
+
+    let start = 0;
+    for (let i = 1; i <= fired.length; i++){
+      if (i === fired.length || fired[i].time - fired[start].time > GROUP_EPS){
+        let hits = 0, hasSync = false;
+        for (let j = start; j < i; j++){
+          const ev = fired[j];
+          applyEvent(ev, vnow, true);
+          if (ev.type === 'hit') hits++; else hasSync = true;
+        }
+        if (hits) pulses.push({ time: fired[start].time, intensity: hits });
+        if (!hasSync && hits >= COMBO_MIN && vnow - lastComboAt > 0.35){
+          addPopup('x' + hits, 'combo', vnow);
+          lastComboAt = vnow;
+        }
+        start = i;
+      }
+    }
+  }
+
+  function addPopup(text, kind, vnow){
+    if (popups.length > 6) popups.shift();
+    popups.push({ text, kind, at: vnow });
+  }
+
+  // ---------- transport ----------
+  function setPlayIcon(playing){
+    playIcon.style.display = playing ? 'none' : '';
+    pauseIcon.style.display = playing ? '' : 'none';
+    playBtn.classList.toggle('on', playing);
+    playBtn.title = playing ? 'Pause (space)' : 'Play (space)';
+    playBtn.setAttribute('aria-label', playing ? 'Pause' : 'Play');
+    playBtn.setAttribute('aria-pressed', String(playing));
+  }
+
+  function togglePlay(){
+    if (!clock.playing){ startClock(); startScheduler(); }
+    else { pauseClock(); stopScheduler(); }
+    setPlayIcon(clock.playing);
+  }
+
+  // Reset rewinds to the very top — everyone lined up, counts cleared — and keeps
+  // playing if it was playing, so the restart lands as one big downbeat
+  function resetAll(){
+    const wasPlaying = clock.playing;
+    if (wasPlaying){ pauseClock(); stopScheduler(); }
+    silenceTones();
+    layers = buildLayers(0, null, userVoiceCount);
+    retiredCounts = [];
+    nextSyncCycle = 1; syncCount = 0; totalHits = 0;
+    eventQueue = []; pulses = []; popups = [];
+    resetClock();
+    setBpm(baseBpm);
+    showVoiceCount(layers.length);
+    requestGeometry();
+    if (wasPlaying){ startClock(0.1); startScheduler(); }
+    setPlayIcon(clock.playing);
+  }
+
+  // ---------- canvas & layout ----------
+  const ctx = canvas.getContext('2d');
+  const hasConic = !!ctx && typeof ctx.createConicGradient === 'function';
+  let dpr = 1, W = 0, H = 0;
+  const geom = { cx: 0, cy: 0, innerR: 30, outerR: 200 };
+  let tickerDisplay = 'dots';
+  let superMode = false;
+  let chordFlashAt = -9;
+
+  function resizeCanvas(){
+    dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));   // 3x phones cost 2.25x the pixels for no visible gain
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function circleHitsRect(cx, cy, r, rect){
+    const nx = clamp(cx, rect.left, rect.right), ny = clamp(cy, rect.top, rect.bottom);
+    return (cx - nx) ** 2 + (cy - ny) ** 2 < r * r;
+  }
+
+  // Fit the ring into the space the HUD and deck leave free. Tries centered, left of the
+  // chord module, and below it (phones), and takes the biggest ring that doesn't collide.
+  function computeGeometry(){
+    const hr = hud.getBoundingClientRect();
+    const dr = deck.getBoundingClientRect();
+    const bottom = Math.max(160, dr.top - 8);
+    const PAD = 14, TOP_PAD = 46;     // room above the ring for the trigger marker and callouts
+    const fit = (l, r, t, b) => {
+      const w = r - l, h = b - t;
+      const R = Math.min(w / 2 - PAD, (h - TOP_PAD - PAD) / 2);
+      return { cx: (l + r) / 2, cy: t + TOP_PAD + (h - TOP_PAD - PAD) / 2, R };
+    };
+    const candidates = [fit(0, W, 0, bottom), fit(0, hr.left - 8, 0, bottom), fit(0, W, hr.bottom + 4, bottom)];
+    const clear = candidates.filter((c) => c.R > 40 &&
+      !circleHitsRect(c.cx, c.cy, c.R + 8, hr) &&
+      !circleHitsRect(c.cx, c.cy - c.R - 26, 18, hr));
+    const pool = clear.length ? clear : candidates;
+    const best = pool.reduce((a, b) => (b.R > a.R + 0.5 ? b : a));
+    geom.cx = best.cx; geom.cy = best.cy;
+    geom.outerR = Math.max(60, best.R);
+    geom.innerR = Math.max(26, geom.outerR * 0.12);
+  }
+
+  let geometryPending = false;
+  function requestGeometry(){
+    if (geometryPending) return;
+    geometryPending = true;
+    requestAnimationFrame(() => { geometryPending = false; resizeCanvas(); computeGeometry(); });
+  }
+  window.addEventListener('resize', requestGeometry);
+  if ('ResizeObserver' in window){ const ro = new ResizeObserver(requestGeometry); ro.observe(hud); ro.observe(deck); }
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(requestGeometry);
+
+  function colorStr(hue, sat, light, alpha){ return `hsla(${hue.toFixed(1)},${sat}%,${light}%,${alpha})`; }
+
+  let lastFont = '';
+  function setFont(f){ if (f !== lastFont){ ctx.font = f; lastFont = f; } }
+
+  function drawFrame(){
+    requestAnimationFrame(drawFrame);
+    const now = audioNow();
+    const vnow = performance.now() / 1000;
+    processEvents(now, vnow);
+
+    ctx.clearRect(0, 0, W, H);
+    lastFont = '';
+    const { cx, cy, innerR, outerR } = geom;
+    const count = layers.length;
+    const cyclePos = cycleAtTime(now);
+    const denom = Math.max(count - 1, 1);
+
+    // radii ease toward their slots so voice-count changes settle instead of snapping
+    for (let i = 0; i < count; i++){
+      const l = layers[i];
+      const target = innerR + (outerR - innerR) * (i / denom);
+      l.dispR = l.dispR == null ? target : l.dispR + (target - l.dispR) * 0.12;
+    }
+
+    // orbit paths: one batched path; they flare briefly when the chord changes
+    const chordGlow = Math.max(0, 1 - (vnow - chordFlashAt) / 0.6);
+    ctx.beginPath();
+    for (let i = 0; i < count; i++){ const r = layers[i].dispR; ctx.moveTo(cx + r, cy); ctx.arc(cx, cy, r, 0, TAU); }
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = `rgba(255,182,119,${(0.05 + chordGlow * 0.2).toFixed(3)})`;
+    ctx.stroke();
+
+    // a newly grown voice lights up its own orbit as it arrives
+    for (let i = 0; i < count; i++){
+      const l = layers[i];
+      const age = vnow - l.spawnAt;
+      if (age >= 0 && age < 1.6){
+        ctx.beginPath();
+        ctx.arc(cx, cy, l.dispR, 0, TAU);
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = colorStr(l.hue, 90, 66, ((1 - age / 1.6) * 0.7).toFixed(3));
+        ctx.stroke();
+      }
+    }
+
+    // trigger guide + notch
+    const markerY = cy - outerR - 16;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - innerR * 0.6);
+    ctx.lineTo(cx, markerY + 6);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(255,182,119,0.12)';
+    ctx.stroke();
+
+    // trails (only the arc segment is stroked — far fewer pixels than full circles)
+    const sweep = superMode ? 1.8 : 0.55;
+    const trailA = superMode ? 0.55 : 0.42;
+    ctx.lineWidth = 2.4;
+    for (let i = 0; i < count; i++){
+      const l = layers[i];
+      const phase = ((cyclePos * l.n) % 1 + 1) % 1;
+      const angle = -Math.PI / 2 + phase * TAU;
+      l.angle = angle;
+      l.x = cx + Math.cos(angle) * l.dispR;
+      l.y = cy + Math.sin(angle) * l.dispR;
+      ctx.beginPath();
+      ctx.arc(cx, cy, l.dispR, angle - sweep, angle);
+      if (hasConic){
+        const grad = ctx.createConicGradient(angle - sweep, cx, cy);
+        const head = sweep / TAU;
+        grad.addColorStop(0, colorStr(l.hue, 75, 60, 0));
+        grad.addColorStop(Math.max(0.001, head - 0.001), colorStr(l.hue, 75, 62, trailA));
+        grad.addColorStop(Math.min(0.999, head + 0.001), colorStr(l.hue, 75, 62, 0));
+        grad.addColorStop(1, colorStr(l.hue, 75, 60, 0));
+        ctx.strokeStyle = grad;
+      } else {
+        ctx.strokeStyle = colorStr(l.hue, 75, 62, trailA * 0.45);
+      }
+      ctx.stroke();
+    }
+
+    // halos, additive — the glow that shadowBlur used to fake at many times the cost
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < count; i++){
+      const l = layers[i];
+      const age = now - l.lastFireTime;
+      const flash = age >= 0 && age < FLASH_DURATION ? 1 - age / FLASH_DURATION : 0;
+      l.flash = flash;
+      if (tickerDisplay === 'dots'){
+        ctx.beginPath();
+        ctx.arc(l.x, l.y, 6 + flash * 14, 0, TAU);
+        ctx.fillStyle = colorStr(l.hue, 85, 62, (0.07 + flash * 0.3).toFixed(3));
+        ctx.fill();
+      } else if (flash > 0){
+        ctx.beginPath();
+        ctx.arc(l.x, l.y, 24 + flash * 14, 0, TAU);
+        ctx.fillStyle = colorStr(l.hue, 85, 62, (flash * 0.35).toFixed(3));
+        ctx.fill();
+      }
+    }
+    ctx.globalCompositeOperation = 'source-over';
+
+    // cores
+    if (tickerDisplay === 'numbers'){
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.lineJoin = 'round';
+      for (let i = 0; i < count; i++){
+        const l = layers[i];
+        const flash = l.flash;
+        const label = String(l.hitCount + 1);           // starts at 1, ticks up each crossing
+        const fontSize = Math.round(32 + flash * 10);
+        setFont(`700 ${fontSize}px 'IBM Plex Mono', ui-monospace, monospace`);
+        const chipR = Math.max(15, fontSize * 0.6 + label.length * 2.2);
+        ctx.beginPath();
+        ctx.arc(l.x, l.y, chipR, 0, TAU);
+        ctx.fillStyle = 'rgba(4,2,7,0.72)';
+        ctx.fill();
+        ctx.lineWidth = Math.max(3, fontSize * 0.13);
+        ctx.strokeStyle = 'rgba(4,2,7,0.9)';
+        ctx.strokeText(label, l.x, l.y);
+        ctx.fillStyle = colorStr(l.hue, 85, 84 + flash * 10, 1);
+        ctx.fillText(label, l.x, l.y);
+      }
+    } else {
+      for (let i = 0; i < count; i++){
+        const l = layers[i];
+        const flash = l.flash;
+        ctx.beginPath();
+        ctx.arc(l.x, l.y, 3.3 * (1 + flash * 1.9), 0, TAU);
+        ctx.fillStyle = colorStr(l.hue, 85, 72 + flash * 14, 0.92);
+        ctx.fill();
+        if (flash > 0.4){                                   // white-hot center on the strike
+          ctx.beginPath();
+          ctx.arc(l.x, l.y, 2.2 * flash, 0, TAU);
+          ctx.fillStyle = `rgba(255,246,235,${(flash * 0.9).toFixed(3)})`;
+          ctx.fill();
+        }
+      }
+    }
+
+    // shared trigger-point pulses
+    ctx.lineWidth = 2;
+    let p = 0;
+    for (let i = 0; i < pulses.length; i++){
+      const pl = pulses[i];
+      const age = now - pl.time;
+      if (age >= PULSE_DURATION || age < 0){ if (age < 0) pulses[p++] = pl; continue; }
+      pulses[p++] = pl;
+      const t = age / PULSE_DURATION;
+      const eased = 1 - Math.pow(1 - t, 3);
+      const size = 10 + 46 * Math.log2(pl.intensity + 1) * (0.4 + eased * 0.9);
+      const alpha = clamp((0.16 + 0.11 * pl.intensity) * (1 - t), 0, 0.9);
+      ctx.beginPath();
+      ctx.arc(cx, markerY, size, 0, TAU);
+      ctx.strokeStyle = `rgba(255,190,140,${alpha.toFixed(3)})`;
+      ctx.stroke();
+      if (pl.intensity > 4){
+        ctx.beginPath();
+        ctx.arc(cx, markerY, size * 0.5, 0, TAU);
+        ctx.fillStyle = `rgba(255,205,160,${(alpha * 0.5).toFixed(3)})`;
+        ctx.fill();
+      }
+    }
+    pulses.length = p;
+
+    // notch: points down at the strike line
+    ctx.beginPath();
+    ctx.moveTo(cx - 6, markerY - 5);
+    ctx.lineTo(cx + 6, markerY - 5);
+    ctx.lineTo(cx, markerY + 4);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(255,182,119,0.8)';
+    ctx.fill();
+
+    drawPopups(vnow, cx, markerY);
+    updateHud(now, cyclePos);
+  }
+
+  // arcade callouts rising off the strike point, with the logo's chromatic fringe
+  function drawPopups(vnow, cx, markerY){
+    if (!popups.length) return;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    let k = 0;
+    for (const pp of popups){
+      const life = pp.kind === 'big' ? 1.4 : 0.95;
+      const age = vnow - pp.at;
+      if (age > life) continue;
+      popups[k++] = pp;
+      const t = age / life;
+      const rise = mqReduce.matches ? 0 : t * 22;
+      const y = markerY - (pp.kind === 'sub' ? 12 : 28) - rise;
+      const size = pp.kind === 'big' ? 16 : pp.kind === 'sub' ? 8 : 11;
+      const a = 1 - t * t;
+      setFont(`${size}px 'Press Start 2P', ui-monospace, monospace`);
+      ctx.fillStyle = `rgba(255,80,120,${(a * 0.6).toFixed(3)})`;
+      ctx.fillText(pp.text, cx - 1.5, y);
+      ctx.fillStyle = `rgba(110,220,255,${(a * 0.6).toFixed(3)})`;
+      ctx.fillText(pp.text, cx + 1.5, y);
+      ctx.fillStyle = pp.kind === 'combo' ? `rgba(255,120,150,${a.toFixed(3)})` : `rgba(255,200,150,${a.toFixed(3)})`;
+      ctx.fillText(pp.text, cx, y);
+    }
+    popups.length = k;
+  }
+
+  // ---------- HUD (DOM writes only when a value actually changes) ----------
+  const textCache = new Map();
+  function setText(el, v){ if (textCache.get(el) !== v){ textCache.set(el, v); el.textContent = v; } }
+  let lastFill = -1;
+
+  function updateHud(now, cyclePos){
+    setText(hitCountEl, totalHits.toLocaleString());
+    setText(cycleCountEl, String(syncCount + 1));
+    const frac = ((cyclePos % 1) + 1) % 1;
+    const s = Math.max(0, Math.ceil((1 - frac) / clock.cyclesPerSecond - 1e-6));
+    setText(syncCountdownEl, `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`);
+    if (Math.abs(frac - lastFill) > 0.001){ lastFill = frac; syncFillEl.style.transform = `scaleX(${frac.toFixed(4)})`; }
+  }
+
+  // ---------- controls ----------
+  function paintFill(input){
+    const pct = ((input.value - input.min) / (input.max - input.min)) * 100;
+    input.style.setProperty('--fill', pct.toFixed(2) + '%');
+  }
+
+  function showVoiceCount(n){
+    voicesSlider.value = String(n);
+    setText(voicesVal, String(n));
+    paintFill(voicesSlider);
+  }
+
+  function renderChordName(animate){
+    setText(chordNameEl, currentChord.label);
+    if (animate && !mqReduce.matches){
+      chordNameEl.classList.remove('zap'); void chordNameEl.offsetWidth; chordNameEl.classList.add('zap');
+    }
+  }
+
+  function syncChordControls(){
+    Array.from(rootSelect.options).forEach((opt, i) => {
+      opt.textContent = spelling === 'sharp' ? ROOTS[i].sharp : ROOTS[i].flat;
+    });
+    rootSelect.value = String(rootIndex);
+    qualitySelect.value = qualityKey;
+    rootSelect.disabled = isChromatic;
+    qualitySelect.disabled = isChromatic;
+    chromaticBtn.setAttribute('aria-pressed', String(isChromatic));
+    spellBtns.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.spell === spelling)));
+  }
+
+  // pitch changes land on the very next note (≤150 ms) — the rhythm never hiccups
+  function onChordChanged(){
+    recomputeChord();
+    retuneLayers();
+    syncChordControls();
+    renderChordName(true);
+    chordFlashAt = performance.now() / 1000;
+  }
+
+  function buildChordControls(){
+    rootSelect.innerHTML = ROOTS.map((r, i) => `<option value="${i}">${r.sharp}</option>`).join('');
+    qualitySelect.innerHTML = QUALITY_GROUPS.map(([group, keys]) =>
+      `<optgroup label="${group}">` + keys.map((k) => `<option value="${k}">${QUALITIES[k].name}</option>`).join('') + '</optgroup>'
+    ).join('');
+    syncChordControls();
+  }
+
+  function stepRoot(d){ rootIndex = (rootIndex + d + 12) % 12; isChromatic = false; onChordChanged(); }
+  function stepQuality(d){
+    const i = QUALITY_ORDER.indexOf(qualityKey);
+    qualityKey = QUALITY_ORDER[(i + d + QUALITY_ORDER.length) % QUALITY_ORDER.length];
+    isChromatic = false;
+    onChordChanged();
+  }
+  function setSpelling(s){
+    if (s === spelling) return;
+    spelling = s;
+    currentChord.label = chordLabel();     // naming only: no retune
+    syncChordControls();
+    renderChordName(true);
+  }
+  function toggleChromatic(){ isChromatic = !isChromatic; onChordChanged(); }
+
+  function setTickerDisplay(mode){
+    tickerDisplay = mode;
+    displayBtns.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.display === mode)));
+  }
+
+  let playLock = false;
+  playBtn.addEventListener('click', () => {
+    if (playLock) return;
+    playLock = true;
+    setTimeout(() => { playLock = false; }, 90);
+    togglePlay();
+  });
+  resetBtn.addEventListener('click', resetAll);
+
+  bpmSlider.addEventListener('input', () => {
+    const bpm = parseFloat(bpmSlider.value);
+    setText(bpmVal, String(bpm));
+    paintFill(bpmSlider);
+    setBaseBpm(bpm);
+  });
+  voicesSlider.addEventListener('input', () => {
+    const v = parseInt(voicesSlider.value, 10);
+    userVoiceCount = v;
+    setText(voicesVal, String(v));
+    paintFill(voicesSlider);
+    setVoiceCount(v);
+  });
+  volSlider.addEventListener('input', () => {
+    const v = parseFloat(volSlider.value);
+    setText(volVal, String(v));
+    paintFill(volSlider);
+    if (masterGain) masterGain.gain.setTargetAtTime(volumeToGain(v), audioCtx.currentTime, 0.05);
+  });
+
+  rootSelect.addEventListener('change', () => { rootIndex = parseInt(rootSelect.value, 10); isChromatic = false; onChordChanged(); });
+  qualitySelect.addEventListener('change', () => { qualityKey = qualitySelect.value; isChromatic = false; onChordChanged(); });
+  chromaticBtn.addEventListener('click', toggleChromatic);
+  spellBtns.forEach((b) => b.addEventListener('click', () => setSpelling(b.dataset.spell)));
+  displayBtns.forEach((b) => b.addEventListener('click', () => setTickerDisplay(b.dataset.display)));
+
+  // ---------- keyboard ----------
+  const KONAMI = ['ArrowUp','ArrowUp','ArrowDown','ArrowDown','ArrowLeft','ArrowRight','ArrowLeft','ArrowRight','b','a'];
+  let konamiPos = 0;
+
+  function checkKonami(key){
+    const k = key.length === 1 ? key.toLowerCase() : key;
+    konamiPos = k === KONAMI[konamiPos] ? konamiPos + 1 : (k === KONAMI[0] ? 1 : 0);
+    if (konamiPos === KONAMI.length){
+      konamiPos = 0;
+      superMode = !superMode;
+      addPopup(superMode ? 'SUPER MODE' : 'NORMAL MODE', 'big', performance.now() / 1000);
+      if (superMode) shout('SUPER!');
+    }
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (introState === 'idle'){
+      if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); startIntro(); }
+      return;
+    }
+    if (introState === 'playing'){
+      if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape'){ e.preventDefault(); skipIntro(); }
+      return;
+    }
+    const tag = e.target && e.target.tagName;
+    const inField = tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA';
+    const onButton = tag === 'BUTTON' || (e.target && e.target.getAttribute && e.target.getAttribute('role') === 'button');
+    if (!inField) checkKonami(e.key);
+
+    if (e.key === ' ' && !inField && !onButton){ e.preventDefault(); togglePlay(); return; }
+    if (inField) return;   // sliders and dropdowns keep their native arrow keys
+    switch (e.key){
+      case 'ArrowLeft':  e.preventDefault(); stepRoot(-1); break;
+      case 'ArrowRight': e.preventDefault(); stepRoot(1); break;
+      case 'ArrowUp':    e.preventDefault(); stepQuality(1); break;
+      case 'ArrowDown':  e.preventDefault(); stepQuality(-1); break;
+      case 'n': case 'N': setTickerDisplay(tickerDisplay === 'dots' ? 'numbers' : 'dots'); break;
+      case 'c': case 'C': toggleChromatic(); break;
+    }
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && clock.playing) resumeAudio();
+  });
+
+  // ---------- init ----------
+  if (mqCoarse.matches){
+    $('pressLabel').textContent = 'TAP TO START';
+    $('skipLabel').textContent = 'tap to skip';
+  }
+  setChromeInert(true);
+  dockEl.tabIndex = -1;
+  buildChordControls();
+  renderChordName(false);
+  setBaseBpm(parseFloat(bpmSlider.value));
+  [voicesSlider, bpmSlider, volSlider].forEach(paintFill);
+  setPlayIcon(false);
+  resizeCanvas();
+  computeGeometry();
+  backdrop.focus({ preventScroll: true });
+  requestAnimationFrame(drawFrame);
+})();
+</script>
+</body>
+</html>
